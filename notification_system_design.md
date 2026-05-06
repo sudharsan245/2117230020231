@@ -455,3 +455,48 @@ function process_delivery(job_id, student_id, message):
 ## Final Recommendation
 
 Use asynchronous job processing with idempotent writes and per-recipient retry tracking. That is the most reliable approach for a 50,000-student placement blast, and it scales far better than a single synchronous loop.
+
+# Stage 6
+
+## Priority Inbox Requirement
+
+The priority inbox should always show the top `n` unread notifications first, where `n` can be 10, 15, 20, or any value chosen by the user or the UI.
+
+## Priority Rule
+
+Priority should combine:
+
+- notification type weight, where `Placement > Result > Event`
+- recency, so newer items can outrank older ones when the type weight is similar
+
+## Implementation Choice
+
+I used TypeScript for the implementation and kept it free of external algorithm libraries. The code fetches notifications from the provided Notification API and computes the top `n` items in memory using a bounded min-heap.
+
+Why this approach works well:
+
+- it does not require a database query for ranking
+- it keeps only the best `n` items in memory at any time
+- it scales better than sorting the full list when new notifications keep arriving
+- it avoids hard-coding notifications or storing them in a local database
+
+## Efficiency Strategy
+
+To maintain the top 10 efficiently as new notifications arrive:
+
+- keep a min-heap of size 10
+- score each incoming notification using type weight and timestamp
+- if the heap is not full, insert the item
+- if the heap is full and the new item is better than the current minimum, replace the minimum
+- sort only the final 10 items when rendering the output
+
+This makes the update cost per notification roughly $O(\log 10)$ instead of sorting the entire feed again.
+
+## Code File
+
+The working implementation is in [stage6/priority_inbox.ts](stage6/priority_inbox.ts).
+
+## Output Capture
+
+The output should be captured after running the script so the repository contains a screenshot showing the ranked priority notifications. That screenshot can be taken from the console or from the rendered UI if the script output is displayed in a page.
+
