@@ -95,3 +95,114 @@ Query parameters:
 ## Real-time Strategy
 
 For the assessment, the simplest reliable option is a polling-friendly API plus frontend refresh hooks. If a true push channel is required later, the same contract can be extended to SSE or WebSocket without changing the notification payload.
+
+# Stage 2
+
+## Database Choice
+
+Use PostgreSQL.
+
+Reasoning:
+
+- notifications have structured fields and predictable query patterns
+- unread and per-student lookups benefit from composite indexes
+- bulk inserts, updates, and joins are straightforward in a relational model
+- the schema fits the notification contract from Stage 1 without extra transformation
+
+## Suggested Schema
+
+```sql
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY,
+  student_id BIGINT NOT NULL,
+  type VARCHAR(32) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  message TEXT NOT NULL,
+  priority_score INT NOT NULL DEFAULT 50,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  source VARCHAR(16) NOT NULL DEFAULT 'live',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_notifications_student_read_created
+  ON notifications (student_id, is_read, created_at DESC);
+
+CREATE INDEX idx_notifications_student_type_created
+  ON notifications (student_id, type, created_at DESC);
+
+CREATE INDEX idx_notifications_priority_created
+  ON notifications (priority_score DESC, created_at DESC);
+```
+
+## Problems As Volume Increases
+
+- full table scans become expensive for unread and filtered inbox queries
+- bulk notification fan-out increases write pressure
+- sorting by recency or priority gets slower without the right indexes
+- repeated page loads can overload the database with the same read query
+- marking notifications read/unread at high frequency increases update contention
+
+## How To Solve Them
+
+- use composite indexes that match the query pattern exactly
+- paginate or limit notification reads instead of returning everything
+- cache unread counts and top-priority inbox items for short periods
+- separate read-heavy endpoints from write-heavy fan-out workflows
+- if the dataset grows very large, partition by tenant, cohort, or time range
+- move bulk delivery to async processing so the user request does not wait on every insert
+
+## SQL Queries
+
+Unread notifications for a student:
+
+```sql
+SELECT id, student_id, type, title, message, priority_score, created_at, is_read, source
+FROM notifications
+WHERE student_id = $1 AND is_read = FALSE
+ORDER BY created_at DESC
+LIMIT $2;
+```
+
+Filter by type:
+
+```sql
+SELECT id, student_id, type, title, message, priority_score, created_at, is_read, source
+FROM notifications
+WHERE student_id = $1 AND type = $2
+ORDER BY created_at DESC;
+```
+
+Fetch the top priority inbox items:
+
+```sql
+SELECT id, student_id, type, title, message, priority_score, created_at, is_read, source
+FROM notifications
+WHERE student_id = $1
+ORDER BY priority_score DESC, created_at DESC
+LIMIT $2;
+```
+
+Bulk insert for a placement event:
+
+```sql
+INSERT INTO notifications (id, student_id, type, title, message, priority_score, is_read, source)
+VALUES (gen_random_uuid(), $1, 'Placement', $2, $3, $4, FALSE, 'live');
+```
+
+Mark a notification as read:
+
+```sql
+UPDATE notifications
+SET is_read = TRUE, updated_at = NOW()
+WHERE id = $1 AND student_id = $2;
+```
+
+## API-Aligned Notes
+
+The REST endpoints from Stage 1 map cleanly to the schema:
+
+- `GET /api/notifications` maps to filtered `SELECT` queries
+- `GET /api/notifications/top` maps to a priority-ordered `SELECT`
+- `POST /api/notifications/bulk` maps to `INSERT` operations for multiple students
+- `PATCH /api/notifications/:id/read` maps to the update query above
