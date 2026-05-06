@@ -206,3 +206,81 @@ The REST endpoints from Stage 1 map cleanly to the schema:
 - `GET /api/notifications/top` maps to a priority-ordered `SELECT`
 - `POST /api/notifications/bulk` maps to `INSERT` operations for multiple students
 - `PATCH /api/notifications/:id/read` maps to the update query above
+
+# Stage 3
+
+## Query Review
+
+The query is logically correct for the intended result, but it is not ideal for the workload:
+
+```sql
+SELECT * FROM notifications
+WHERE studentID = 1042 AND isRead = false
+ORDER BY createdAt ASC;
+```
+
+It is slow because:
+
+- `SELECT *` reads more columns than the API usually needs
+- `studentID` and `isRead` may not be supported by a useful composite index
+- sorting by `createdAt ASC` can still require a sort step if the index does not match the order
+- at 50,000 students and 5,000,000 notifications, the database must inspect a much larger working set
+
+## What I Would Change
+
+Use only the needed columns, filter by the current student, sort newest unread notifications first, and paginate or limit the result set:
+
+```sql
+SELECT id, student_id, type, title, message, priority_score, created_at, is_read, source
+FROM notifications
+WHERE student_id = $1 AND is_read = FALSE
+ORDER BY created_at DESC
+LIMIT $2;
+```
+
+Likely computational cost:
+
+- without an index, the cost trends toward a large scan across the notification table
+- with a suitable composite index, the cost drops to a targeted index range scan plus a much smaller result fetch
+- the sort cost also drops if the index matches both filtering and ordering
+
+## Indexes On Every Column
+
+Adding indexes on every column is not effective.
+
+Why not:
+
+- every index adds write overhead for inserts, updates, and deletes
+- storage cost rises quickly
+- the optimizer may still ignore irrelevant indexes
+- too many indexes can make bulk notification inserts slower
+
+Better approach:
+
+```sql
+CREATE INDEX idx_notifications_student_isread_created
+  ON notifications (student_id, is_read, created_at DESC);
+
+CREATE INDEX idx_notifications_type_created
+  ON notifications (type, created_at DESC);
+```
+
+## Placement Query
+
+To find all students who got a placement notification in the last 7 days:
+
+```sql
+SELECT DISTINCT student_id
+FROM notifications
+WHERE notification_type = 'Placement'
+  AND created_at >= NOW() - INTERVAL '7 days';
+```
+
+If the column is implemented as an enum, the query remains the same in logic; the database simply enforces that `notification_type` can only be `Event`, `Result`, or `Placement`.
+
+## API Tie-In
+
+- `GET /api/notifications` should use the unread query or a filtered variant of it
+- `GET /api/notifications/top` should use an ordered query with a limit
+- `POST /api/notifications/bulk` should avoid per-row client round trips and rely on batched inserts
+- `PATCH /api/notifications/:id/read` should update one row by notification id and student id
