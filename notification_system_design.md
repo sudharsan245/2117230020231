@@ -284,3 +284,86 @@ If the column is implemented as an enum, the query remains the same in logic; th
 - `GET /api/notifications/top` should use an ordered query with a limit
 - `POST /api/notifications/bulk` should avoid per-row client round trips and rely on batched inserts
 - `PATCH /api/notifications/:id/read` should update one row by notification id and student id
+
+# Stage 4
+
+## Problem
+
+If notifications are fetched on every page load for every student, the database gets hit repeatedly with the same kind of query. That creates unnecessary read pressure, increases latency, and makes the user experience worse when traffic grows.
+
+## Recommended Solution
+
+Use a combination of client-side caching, limited fetches, and a read-optimized data flow instead of fetching the full notification set on every page load.
+
+Practical approach:
+
+- fetch only the current student’s notifications
+- return only the required subset, such as unread or top-priority items
+- cache the response briefly on the client
+- refresh data only when needed, not on every route transition
+- use pagination or a small `limit` for inbox screens
+- optionally move to SSE or WebSocket if the product needs live push updates
+
+## How Performance Improves
+
+- fewer repeated database queries
+- smaller payloads over the network
+- faster first paint on the frontend
+- less sorting and filtering work on the database
+- lower read amplification during busy periods
+
+## Tradeoffs
+
+### Client Caching
+
+Pros:
+
+- simplest to add
+- reduces repeated requests immediately
+- keeps the UI responsive
+
+Cons:
+
+- cached data can become slightly stale
+- cache invalidation needs care after mark-read or new notifications
+
+### Pagination Or Limits
+
+Pros:
+
+- reduces response size
+- prevents large inbox responses from blocking the page
+- works well with indexes
+
+Cons:
+
+- the user may need to load more items manually
+- not ideal if the UI must always show the full history at once
+
+### Server Push With SSE Or WebSocket
+
+Pros:
+
+- real-time updates without constant polling
+- better for instant inbox behavior
+
+Cons:
+
+- more infrastructure and connection management
+- harder to scale than simple request/response
+
+### Read Replica Or Cache Layer
+
+Pros:
+
+- protects the primary database from heavy read traffic
+- useful when notification reads dominate
+
+Cons:
+
+- added operational complexity
+- data may be eventually consistent depending on the setup
+
+## Best Balance For This Assessment
+
+The best practical answer is to combine short-lived client caching with indexed, limited queries. That solves the immediate overload problem without introducing unnecessary system complexity. If real-time behavior is important later, SSE is a cleaner next step than full bidirectional messaging for this use case.
