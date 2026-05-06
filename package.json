@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "tsx watch backend/src/index.ts",
-    "dev:client": "vite --config frontend/vite.config.ts",
+    "dev:server": "tsx watch notification_app_be/src/index.ts",
+    "dev:client": "vite --config notification_app_fe/vite.config.ts",
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsc -p backend/tsconfig.json",
-    "build:client": "vite build --config frontend/vite.config.ts",
-    "preview": "vite preview --config frontend/vite.config.ts"
+    "build:server": "tsc -p notification_app_be/tsconfig.json",
+    "build:client": "vite build --config notification_app_fe/vite.config.ts",
+    "preview": "vite preview --config notification_app_fe/vite.config.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.13.3",

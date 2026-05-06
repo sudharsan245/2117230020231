@@ -498,5 +498,76 @@ The working implementation is in [stage6/priority_inbox.ts](stage6/priority_inbo
 
 ## Output Capture
 
-The output should be captured after running the script so the repository contains a screenshot showing the ranked priority notifications. That screenshot can be taken from the console or from the rendered UI if the script output is displayed in a page.
+![alt text](image-1.png)
+![alt text](image-1.png)
+
+# Stage 7
+
+## Frontend Requirement
+
+Build a responsive React or Next.js frontend that runs on `http://localhost:3000` and uses Material UI for styling. The UI should avoid clutter, highlight important items, and work cleanly on both desktop and mobile screens.
+
+## Pages And Behavior
+
+- show all notifications on one page
+- show priority notifications on a separate page
+- filter notifications by `notification_type`
+- distinguish new notifications from already viewed ones
+- support limited top-`n` inbox display
+- keep the UI readable and production-like rather than crowded
+
+## API Testing URL For Insomnia
+
+Use this sample URL to paste directly into Insomnia:
+
+```text
+http://20.207.122.201/evaluation-service/notifications?limit=10&page=1&notification_type=Placement
+```
+
+**Important:** This is a protected route. Add the Authorization header:
+
+```text
+Authorization: Bearer <your_access_token>
+```
+
+Other sample variations:
+
+```text
+http://20.207.122.201/evaluation-service/notifications?limit=10&page=1&notification_type=Result
+http://20.207.122.201/evaluation-service/notifications?limit=10&page=1&notification_type=Event
+http://20.207.122.201/evaluation-service/notifications?limit=20&page=1
+```
+
+All require the same `Authorization: Bearer <access_token>` header.
+
+## Expected API Response Shape
+
+The response should contain a `notifications` array with items similar to:
+
+```json
+{
+  "notifications": [
+    {
+      "ID": "d146095a-0d86-4a34-9e69-3900a14576bc",
+      "Type": "Result",
+      "Message": "mid-sem",
+      "Timestamp": "2026-04-22 17:51:30"
+    }
+  ]
+}
+```
+
+## Frontend Strategy
+
+The frontend should fetch from the Notification API, keep the current page state in the UI, and render the top `n` notifications without storing them in a database. A bounded in-memory priority list or heap is enough for the top-10 inbox view, while the all-notifications page can render the paginated API response directly.
+
+## Screenshot Requirement
+
+After pasting the sample URL into Insomnia and confirming the output, take screenshots of:
+
+- the API response in Insomnia
+- the React desktop view
+- the React mobile view
+
+These screenshots should be placed alongside the same repository submission.
 

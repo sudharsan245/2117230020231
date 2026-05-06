@@ -37,8 +37,13 @@ export function updateReadStatus(id: string, isRead: boolean) {
   return notificationStore.markRead(id, isRead);
 }
 
-export async function syncFromNotificationApi(apiUrl: string) {
-  const response = await fetch(apiUrl);
+export async function syncFromNotificationApi(apiUrl: string, authToken?: string) {
+  const authorizationToken = authToken ?? process.env.AUTHORIZATION_TOKEN;
+  const response = await fetch(apiUrl, {
+    headers: {
+      ...(authorizationToken ? { "Authorization": `Bearer ${authorizationToken}` } : {})
+    }
+  });
 
   if (!response.ok) {
     throw new Error(`Notification API failed with ${response.status}`);
