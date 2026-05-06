@@ -367,3 +367,91 @@ Cons:
 ## Best Balance For This Assessment
 
 The best practical answer is to combine short-lived client caching with indexed, limited queries. That solves the immediate overload problem without introducing unnecessary system complexity. If real-time behavior is important later, SSE is a cleaner next step than full bidirectional messaging for this use case.
+
+# Stage 5
+
+## Shortcomings Of The Naive Implementation
+
+The proposed loop is not reliable or fast enough:
+
+```text
+function notify_all(student_ids: array, message: string):
+  for student_id in student_ids:
+    send_email(student_id, message)
+    save_to_db(student_id, message)
+    push_to_app(student_id, message)
+```
+
+Problems:
+
+- it runs sequentially, so 50,000 students take too long
+- one failure can block the rest of the batch
+- email, database insert, and push notification are tightly coupled
+- the caller does not get a durable record of what succeeded or failed
+- retries are hard because the function has no job or status tracking
+
+## What To Do If `send_email` Fails For 200 Students
+
+Do not restart the whole batch from the beginning.
+
+Instead:
+
+- record the 200 failures separately
+- retry only the failed recipients
+- keep the successful ones marked as delivered
+- use a retry queue with backoff
+- if the error persists, move those records to a dead-letter or manual review path
+
+This avoids duplicate emails and keeps the process moving for the remaining 49,800 students.
+
+## Should Saving To DB And Sending Happen Together
+
+They should be logically related, but not executed as one blocking step in the request thread.
+
+Why:
+
+- database writes should be durable even if email delivery fails
+- email delivery should be retriable without rewriting the full notification row
+- the UI only needs an accepted job response, not the completion of every delivery
+
+Best design:
+
+- create a notification job
+- store the notification records first
+- enqueue email and push work to background workers
+- update delivery status as each worker succeeds or fails
+
+## Revised Pseudocode
+
+```text
+function notify_all(student_ids: array, message: string):
+  job_id = create_notification_job(student_ids, message)
+  persist_notifications(job_id, student_ids, message)
+  enqueue_email_and_push_jobs(job_id, student_ids, message)
+  return { job_id, status: "accepted" }
+```
+
+Worker flow:
+
+```text
+function process_delivery(job_id, student_id, message):
+  try:
+    send_email(student_id, message)
+    push_to_app(student_id, message)
+    mark_delivery_success(job_id, student_id)
+  catch error:
+    mark_delivery_failed(job_id, student_id)
+    schedule_retry(job_id, student_id)
+```
+
+## Why This Is Faster And More Reliable
+
+- the API returns quickly because it only enqueues work
+- background workers can run in parallel
+- failures are isolated to individual recipients
+- retries do not duplicate successful messages
+- the database keeps an audit trail of delivery status
+
+## Final Recommendation
+
+Use asynchronous job processing with idempotent writes and per-recipient retry tracking. That is the most reliable approach for a 50,000-student placement blast, and it scales far better than a single synchronous loop.
